@@ -1,4 +1,6 @@
+#![allow(unused_imports)]
 use roff::{Roff, bold, italic, roman};
+use std::{env, path::PathBuf};
 
 fn main() {
     let page = Roff::new()
@@ -6,27 +8,23 @@ fn main() {
         .control("SH", ["NAME"])
         .text([roman("sesh - Semantic Shell")])
         .control("SH", ["SYNOPSIS"])
-        .text([
-            bold("sesh"),
-            roman(" [options]"),
-        ])
+        .text([bold("sesh"), roman(" [options]")])
         .control("SH", ["DESCRIPTION"])
         .text([
             bold("sesh"),
             roman("is a shell designed to be as semantic to use as possible"),
         ])
-        .control("SH", ["OPTIONS"])
-        .control("TP", [])
-        .text([
-            bold("-n"),
-            roman(", "),
-            bold("--bits"),
-            roman("="),
-            italic("BITS"),
-        ])
-        .text([roman(
-            "Set the number of bits to modify. Default is one bit.",
-        )])
         .render();
-    print!("{}", page);
+    std::fs::write(
+        PathBuf::from(env::var_os("OUT_DIR").unwrap())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("sesh.1"),
+        page,
+    )
+    .unwrap();
 }
