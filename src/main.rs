@@ -48,6 +48,14 @@ enum Variable {
     Nonlocal(OsString),
 }
 
+/// A single alias
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Alias {
+    /// alias from
+    name: String,
+    /// to
+    to: String
+}
 /// The state of the shell
 #[derive(Clone, Debug)]
 struct State {
@@ -61,6 +69,8 @@ struct State {
     history: Vec<State>,
     /// Current working directory.
     working_dir: PathBuf,
+    /// A list of aliases from name to actual
+    aliases: Vec<Alias>
 }
 
 unsafe impl Sync for State {}
@@ -160,13 +170,26 @@ fn eval(statement: &str, state: &mut State) {
     let statements = split_statements(&statement);
 
     for statement in statements {
-        let statement_split = split_statement(&statement);
+        let mut statement_split = split_statement(&statement);
         if statement.is_empty() || statement_split[0].is_empty() {
             continue;
         }
+        let mut program_name = statement_split[0].clone();
+
+        for alias in &state.aliases {
+            if program_name == alias.name {
+                let to_split = split_statement(&alias.to);
+                for (i, item) in to_split[1..].iter().enumerate() {
+                    statement_split.insert(i+1, (*item).clone());
+                }
+                program_name = to_split[0].clone();
+                continue;
+            }
+        }
+
         if let Some(builtin) = builtins::BUILTINS
             .iter()
-            .find(|v| v.0 == statement_split[0])
+            .find(|v| v.0 == program_name)
         {
             let status = builtin.1(statement_split, statement.to_string(), state);
             for (i, var) in state.shell_env.clone().into_iter().enumerate() {
@@ -181,7 +204,7 @@ fn eval(statement: &str, state: &mut State) {
             });
             continue;
         }
-        match std::process::Command::new(statement_split[0].clone())
+        match std::process::Command::new(program_name.clone())
             .args(&statement_split[1..])
             .current_dir(state.working_dir.clone())
             .spawn()
@@ -258,6 +281,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         history: Vec::new(),
         working_dir: std::env::current_dir()
             .unwrap_or(std::env::home_dir().unwrap_or(PathBuf::from("/"))),
+        aliases: Vec::new(),
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT1".to_string(),
