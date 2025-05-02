@@ -5,10 +5,9 @@
 
 use std::{
     ffi::{OsStr, OsString},
-    io::Write,
+    io::{Read, Write},
     path::PathBuf,
-    rc::Rc,
-    sync::Mutex,
+    sync::{Arc, Mutex, RwLock},
 };
 
 use clap::Parser;
@@ -53,7 +52,7 @@ enum Variable {
 #[derive(Clone, Debug)]
 struct State {
     /// Environment variables
-    env: Rc<Mutex<std::env::VarsOs>>,
+    env: Arc<Mutex<std::env::VarsOs>>,
     /// Shell-local variables only accessible via builtins.
     shell_env: ShellVars,
     /// The focused variable.
@@ -64,6 +63,10 @@ struct State {
     working_dir: PathBuf,
 }
 
+unsafe impl Sync for State {}
+unsafe impl Send for State {}
+
+/// Split a statement.
 fn split_statement(statement: &str) -> Vec<String> {
     let mut out = vec![String::new()];
     let mut i: usize = 0;
@@ -91,32 +94,50 @@ fn split_statement(statement: &str) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
+/// Removes comments from a statement
+fn remove_comments(statement: &str) -> String {
+    let mut out = String::new();
+    let mut in_comment = false;
+    for ch in statement.chars() {
+        if in_comment {
+            if ch == '\n' {
+                out.push(ch);
+                in_comment = false
+            }
+            continue;
+        }
+        if ch == '#' {
+            in_comment = true;
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
 /// Evaluate a statement. May include multiple.
 fn eval(statement: &str, state: &mut State) {
-    let statement = escapes::interpret_escaped_string(statement);
-    if statement.is_err() {
-        println!("sesh: invalid escape: {}", statement.unwrap_err());
-        return;
-    }
+    let statement = remove_comments(statement);
     let statements = statement
-        .unwrap()
         .split("\n")
         .map(|val| val.split(";").collect::<Vec<&str>>())
         .collect::<Vec<Vec<&str>>>()
         .iter()
         .map(|val| val.iter().map(|val| val.trim()).collect::<Vec<&str>>())
         .collect::<Vec<Vec<&str>>>()
-        .concat()
-        .iter()
-        .map(|val| split_statement(val))
-        .collect::<Vec<Vec<String>>>();
+        .concat();
 
     for statement in statements {
-        if statement.is_empty() || statement[0].is_empty() {
+        let statement_split = split_statement(statement);
+        if statement.is_empty() || statement_split[0].is_empty() {
             continue;
         }
-        if let Some(builtin) = builtins::BUILTINS.iter().find(|v| v.0 == statement[0]) {
-            let status = builtin.1(statement, state);
+        if let Some(builtin) = builtins::BUILTINS
+            .iter()
+            .find(|v| v.0 == statement_split[0])
+        {
+            let status = builtin.1(statement_split, statement.to_string(), state);
             for (i, var) in state.shell_env.clone().into_iter().enumerate() {
                 if var.name == "STATUS" {
                     state.shell_env.swap_remove(i);
@@ -129,8 +150,8 @@ fn eval(statement: &str, state: &mut State) {
             });
             continue;
         }
-        match std::process::Command::new(statement[0].clone())
-            .args(&statement[1..])
+        match std::process::Command::new(statement_split[0].clone())
+            .args(&statement_split[1..])
             .current_dir(state.working_dir.clone())
             .spawn()
         {
@@ -154,14 +175,53 @@ fn eval(statement: &str, state: &mut State) {
         }
     }
 
-    state.env = Rc::new(Mutex::new(std::env::vars_os()));
-    state.history.push(state.clone());
+    state.env = Arc::new(Mutex::new(std::env::vars_os()));
+    let s = state.clone();
+    state.history.push(s);
 }
 
+/// Write the prompt to the screen.
+fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
+    let mut prompt = state
+        .shell_env
+        .iter()
+        .find(|var| var.name == "PROMPT")
+        .unwrap_or(&ShellVar {
+            name: "PROMPT".to_string(),
+            value: String::new(),
+        })
+        .value
+        .clone();
+    prompt = prompt.replace(
+        "$u",
+        &users::get_effective_username()
+            .unwrap_or(users::get_current_username().unwrap_or("?".into()))
+            .to_string_lossy(),
+    );
+    prompt = prompt.replace(
+        "$h",
+        &hostname::get().unwrap_or("?".into()).to_string_lossy(),
+    );
+
+    prompt = prompt.replace("$p", &state.working_dir.as_os_str().to_string_lossy());
+    prompt = prompt.replace(
+        "$P",
+        &state
+            .working_dir
+            .file_name()
+            .unwrap_or(OsStr::new("?"))
+            .to_string_lossy(),
+    );
+
+    print!("{}", prompt);
+    std::io::stdout().flush()?;
+    Ok(())
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let interactive = true;
     let mut state = State {
-        env: Rc::new(Mutex::new(std::env::vars_os())),
+        env: Arc::new(Mutex::new(std::env::vars_os())),
         shell_env: Vec::new(),
         focus: Variable::Local(String::new()),
         history: Vec::new(),
@@ -170,45 +230,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT".to_string(),
-        value: "$u@$h $P> ".to_string(),
+        value: "\x1b[32m$u@$h\x1b[39m \x1b[34m$P\x1b[39m> ".to_string(),
     });
-    loop {
-        let mut prompt = state
-            .shell_env
-            .iter()
-            .find(|var| var.name == "PROMPT")
-            .unwrap_or(&ShellVar {
-                name: "PROMPT".to_string(),
-                value: String::new(),
-            })
-            .value
-            .clone();
-        prompt = prompt.replace(
-            "$u",
-            &users::get_effective_username()
-                .unwrap_or(users::get_current_username().unwrap_or("?".into()))
-                .to_string_lossy(),
-        );
-        prompt = prompt.replace(
-            "$h",
-            &hostname::get().unwrap_or("?".into()).to_string_lossy(),
-        );
 
-        prompt = prompt.replace("$p", &state.working_dir.as_os_str().to_string_lossy());
-        prompt = prompt.replace(
-            "$P",
-            &state
-                .working_dir
-                .file_name()
-                .unwrap_or(OsStr::new("?"))
-                .to_string_lossy(),
-        );
+    let ctrlc_cont = Arc::new(RwLock::new(false));
+    let cc2 = ctrlc_cont.clone();
 
-        print!("{}", prompt);
-        std::io::stdout().flush()?;
+    ctrlc::set_handler(move || {
+        (*cc2.write().unwrap()) = true;
+    })
+    .expect("Error setting Ctrl-C handler");
+    'mainloop: loop {
+        write_prompt(state.clone())?;
 
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
+
+        let mut i0 = [0u8];
+        while i0[0] != b'\n' {
+            if ctrlc_cont.read().unwrap().to_owned() {
+                input.clear();
+                (*ctrlc_cont.write().unwrap()) = false;
+                println!();
+                continue 'mainloop;
+            }
+            let amount = std::io::stdin().read(&mut i0).unwrap();
+            if amount == 0 {
+                continue;
+            }
+            input.push(char::from_u32(i0[0] as u32).unwrap());
+        }
 
         eval(&input, &mut state);
     }
