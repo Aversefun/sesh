@@ -115,21 +115,52 @@ fn remove_comments(statement: &str) -> String {
     out
 }
 
+/// Split something into lines
+fn split_lines(lines: &str) -> Vec<String> {
+    let mut out = vec![String::new()];
+    let mut i: usize = 0;
+    let mut escape_line = false;
+    for ch in lines.chars() {
+        if ch == '\n' && !escape_line {
+            i += 1;
+            if i > out.len() {
+                out.push(String::new());
+            }
+            continue;
+        }
+        if ch == '\\' {
+            escape_line = true;
+            continue;
+        }
+        out[i].push(ch);
+    }
+    out
+}
+
+/// Split a string into statements
+fn split_statements(statement: &str) -> Vec<String> {
+    split_lines(statement)
+        .into_iter()
+        .map(|val| {
+            val.split(";")
+                .map(|val| val.to_string())
+                .collect::<Vec<String>>()
+        })
+        .collect::<Vec<Vec<String>>>()
+        .iter()
+        .map(|val| val.iter().map(|val| val.trim().to_string()).collect::<Vec<String>>())
+        .collect::<Vec<Vec<String>>>()
+        .concat()
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 /// Evaluate a statement. May include multiple.
 fn eval(statement: &str, state: &mut State) {
     let statement = remove_comments(statement);
-    let statements = statement
-        .split("\n")
-        .map(|val| val.split(";").collect::<Vec<&str>>())
-        .collect::<Vec<Vec<&str>>>()
-        .iter()
-        .map(|val| val.iter().map(|val| val.trim()).collect::<Vec<&str>>())
-        .collect::<Vec<Vec<&str>>>()
-        .concat();
+    let statements = split_statements(&statement);
 
     for statement in statements {
-        let statement_split = split_statement(statement);
+        let statement_split = split_statement(&statement);
         if statement.is_empty() || statement_split[0].is_empty() {
             continue;
         }
@@ -185,9 +216,9 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
     let mut prompt = state
         .shell_env
         .iter()
-        .find(|var| var.name == "PROMPT")
+        .find(|var| var.name == "PROMPT1")
         .unwrap_or(&ShellVar {
-            name: "PROMPT".to_string(),
+            name: "PROMPT1".to_string(),
             value: String::new(),
         })
         .value
@@ -229,8 +260,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(std::env::home_dir().unwrap_or(PathBuf::from("/"))),
     };
     state.shell_env.push(ShellVar {
-        name: "PROMPT".to_string(),
+        name: "PROMPT1".to_string(),
         value: "\x1b[32m$u@$h\x1b[39m \x1b[34m$P\x1b[39m> ".to_string(),
+    });
+    state.shell_env.push(ShellVar {
+        name: "PROMPT2".to_string(),
+        value: "> ".to_string(),
     });
 
     let ctrlc_cont = Arc::new(RwLock::new(false));
@@ -246,7 +281,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut input = String::new();
 
         let mut i0 = [0u8];
-        while i0[0] != b'\n' {
+        let mut line_escape = false;
+        while i0[0] != b'\n' || line_escape {
+            if i0[0] == b'\n' {
+                let prompt2 = state
+                    .shell_env
+                    .iter()
+                    .find(|var| var.name == "PROMPT2")
+                    .unwrap_or(&ShellVar {
+                        name: "PROMPT2".to_string(),
+                        value: String::new(),
+                    })
+                    .value
+                    .clone();
+                print!("{}", prompt2);
+                std::io::stdout().flush()?;
+            }
             if ctrlc_cont.read().unwrap().to_owned() {
                 input.clear();
                 (*ctrlc_cont.write().unwrap()) = false;
@@ -256,6 +306,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let amount = std::io::stdin().read(&mut i0).unwrap();
             if amount == 0 {
                 continue;
+            }
+            if i0[0] != b'\n' {
+                line_escape = false;
+            }
+            if i0[0] == b'\\' {
+                line_escape = true;
             }
             input.push(char::from_u32(i0[0] as u32).unwrap());
         }

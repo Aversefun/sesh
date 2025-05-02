@@ -5,7 +5,7 @@
 pub const BUILTINS: [(&str, fn (args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32); 3] = [("cd", cd), ("exit", exit), ("echo", echo)];
 
 /// Change the directory
-pub fn cd(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32 {
+pub fn cd(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
     if args.len() == 1 {
         state.working_dir = std::env::home_dir().unwrap();
         return 0;
