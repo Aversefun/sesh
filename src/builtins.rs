@@ -5,7 +5,14 @@
 pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
-); 4] = [("cd", cd), ("exit", exit), ("echo", echo), ("alias", alias)];
+    &str,
+); 5] = [
+    ("cd", cd, "[dir]"),
+    ("exit", exit, ""),
+    ("echo", echo, "[-e] [text ...]"),
+    ("alias", alias, "[name] [value]"),
+    ("help", help, ""),
+];
 
 /// Change the directory
 pub fn cd(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
@@ -65,5 +72,22 @@ pub fn alias(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
         to: args[2].clone(),
     });
 
+    0
+}
+
+/// Output help on builtins.
+pub fn help(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
+    println!(
+        "sesh, version {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        env!("TARGET")
+    );
+    println!("This provides a list of built-in shell commands.");
+    println!("Use `man sesh` to find out more about the shell in general.");
+    println!("Use `man -k' or `info' to find out more about commands not in this list.");
+    println!();
+    for builtin in BUILTINS {
+        println!("{} {}", builtin.0, builtin.2);
+    }
     0
 }

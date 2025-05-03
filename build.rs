@@ -3,6 +3,11 @@ use roff::{Roff, bold, italic, roman};
 use std::{env, path::PathBuf};
 
 fn main() {
+    println!(
+        "cargo:rustc-env=TARGET={}",
+        std::env::var("TARGET").unwrap()
+    );
+    
     let page = Roff::new()
         .control("TH", ["SESH", "1"])
         .control("SH", ["NAME"])

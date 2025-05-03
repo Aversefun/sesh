@@ -18,7 +18,14 @@ mod escapes;
 /// sesh is a shell designed to be as semantic to use as possible
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct Args {}
+struct Args {
+    /// Run an expression. This will not open an interactive shell. Takes precedence over --before
+    #[arg(long="run", short='c', default_value_t=("".to_string()))]
+    run_expr: String,
+    /// Run an expression before opening an interactive shell.
+    #[arg(long="before", short='b', default_value_t=("".to_string()))]
+    run_before: String,
+}
 
 /// A single shell variable
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -274,6 +281,8 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options = Args::parse();
+
     let mut state = State {
         env: Arc::new(Mutex::new(std::env::vars_os())),
         shell_env: Vec::new(),
@@ -291,6 +300,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: "PROMPT2".to_string(),
         value: "> ".to_string(),
     });
+
+    let mut interactive = true;
+
+    if !options.run_expr.is_empty() {
+        interactive = false;
+        state.shell_env.push(ShellVar {
+            name: "INTERACTIVE".to_string(),
+            value: "false".to_string(),
+        });
+    } else {
+        state.shell_env.push(ShellVar {
+            name: "INTERACTIVE".to_string(),
+            value: "true".to_string(),
+        });
+    }
+
+    let rc = std::fs::read(std::env::home_dir().unwrap().join(".seshrc"));
+    if rc.is_err() {
+        println!("sesh: reading ~/.seshrc failed: {}", rc.unwrap_err());
+        println!("sesh: not running .seshrc")
+    } else {
+        let rc = String::from_utf8(rc.unwrap());
+        if rc.is_err() {
+            println!("sesh: reading ~/.seshrc failed: not valid UTF-8");
+            println!("sesh: not running .seshrc")
+        } else {
+            let rc = rc.unwrap();
+            eval(&rc, &mut state);
+        }
+    }
+
+    if !interactive {
+        eval(&options.run_expr, &mut state);
+        return Ok(());
+    } else if !options.run_before.is_empty() {
+        eval(&options.run_before, &mut state)
+    }
 
     let ctrlc_cont = Arc::new(RwLock::new(false));
     let cc2 = ctrlc_cont.clone();
