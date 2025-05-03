@@ -1,17 +1,20 @@
 //! builtins to sesh
 #![allow(clippy::type_complexity)]
 
+use std::sync::{Arc, Mutex};
+
 /// List of builtins
 pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 5] = [
+); 6] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
     ("alias", alias, "[name] [value]"),
     ("help", help, ""),
+    ("source", eval, "filename [arguments]"),
 ];
 
 /// Change the directory
@@ -86,8 +89,51 @@ pub fn help(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
     println!("Use `man sesh` to find out more about the shell in general.");
     println!("Use `man -k' or `info' to find out more about commands not in this list.");
     println!();
-    for builtin in BUILTINS {
+    let mut builtins = BUILTINS.clone();
+    builtins.sort_by(|v1, v2| v1.0.cmp(v2.0));
+
+    for builtin in builtins {
         println!("{} {}", builtin.0, builtin.2);
     }
+    0
+}
+
+/// Run a file.
+pub fn eval(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 2 {
+        println!("sesh: {}: filename argument required", args[0]);
+        println!("sesh: {0}: usage: {0} filename [arguments]", args[0]);
+        return 1;
+    }
+
+    let file = std::fs::read(args[1].clone());
+    if file.is_err() {
+        println!(
+            "sesh: {}: error opening file: {}",
+            args[0],
+            file.unwrap_err()
+        );
+        return 2;
+    }
+    let file = String::from_utf8(file.unwrap());
+    if file.is_err() {
+        println!("sesh: {}: invalid UTF-8: {}", args[0], file.unwrap_err());
+        return 3;
+    }
+    let file = file.unwrap();
+
+    let mut state2 = state.clone();
+
+    let mut i = 0usize;
+    for arg in &args[1..] {
+        state2.shell_env.push(super::ShellVar {
+            name: format!("{}", i),
+            value: arg.clone(),
+        });
+        i += 1;
+    }
+
+    super::eval(&file, &mut state2);
+
     0
 }

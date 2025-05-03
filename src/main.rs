@@ -38,14 +38,6 @@ struct ShellVar {
 /// A lot of [ShellVar]s.
 type ShellVars = Vec<ShellVar>;
 
-/// Whether a variable is local or not.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum VariableLocality {
-    /// A local variable.
-    Local,
-    /// A nonlocal variable.
-    Nonlocal,
-}
 /// A reference to a variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Variable {
@@ -66,8 +58,6 @@ struct Alias {
 /// The state of the shell
 #[derive(Clone, Debug)]
 struct State {
-    /// Environment variables
-    env: Arc<Mutex<std::env::VarsOs>>,
     /// Shell-local variables only accessible via builtins.
     shell_env: ShellVars,
     /// The focused variable.
@@ -170,11 +160,20 @@ fn split_statements(statement: &str) -> Vec<String> {
         .concat()
 }
 
+/// Substitute in shell variables
+fn substitute_vars(statement: &str, state: State) -> String {
+    let mut out = statement.to_string();
+    for ShellVar { name, value } in state.shell_env {
+        out = out.replace(&("$".to_owned()+&name), &value);
+    }
+    out
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 /// Evaluate a statement. May include multiple.
 fn eval(statement: &str, state: &mut State) {
     let statement = remove_comments(statement);
-    let statements = split_statements(&statement);
+    let statements = split_statements(&substitute_vars(&statement, state.clone()));
 
     for statement in statements {
         let mut statement_split = split_statement(&statement);
@@ -236,7 +235,6 @@ fn eval(statement: &str, state: &mut State) {
         }
     }
 
-    state.env = Arc::new(Mutex::new(std::env::vars_os()));
     let s = state.clone();
     state.history.push(s);
 }
@@ -284,7 +282,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = Args::parse();
 
     let mut state = State {
-        env: Arc::new(Mutex::new(std::env::vars_os())),
         shell_env: Vec::new(),
         focus: Variable::Local(String::new()),
         history: Vec::new(),
