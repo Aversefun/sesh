@@ -6,7 +6,7 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 8] = [
+); 11] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -15,7 +15,9 @@ pub const BUILTINS: [(
     ("source", eval, "filename [arguments]"),
     ("loadf", loadf, "filename [...]"),
     ("splitf", splitf, "[character] [-e]"),
-
+    ("set", set, "name=value [name=value ...]"),
+    ("dumpvars", dumpvars, ""),
+    ("unset", unset, "var [var ...]"),
 ];
 
 /// Change the directory
@@ -200,6 +202,54 @@ pub fn splitf(mut args: Vec<String>, _: String, state: &mut super::State) -> i32
     }
 
     state.focus = split_into(state.focus.clone(), split);
+
+    0
+}
+
+/// Set variable(s)
+pub fn set(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 2 {
+        println!("sesh: {}: at least one variable required", args[0]);
+        println!("sesh: {0}: usage: {0} name=value [name=value ...]", args[0]);
+        return 1;
+    }
+    for var in &args[1..] {
+        let split = var.split_once("=");
+        if split.is_none() {
+            println!("sesh: {}: var=name pairs required", args[0]);
+            println!("sesh: {0}: usage: {0} name=value [name=value ...]", args[0]);
+            return 2;
+        }
+        let (name, value) = split.unwrap();
+        state.shell_env.push(super::ShellVar {
+            name: name.to_string(),
+            value: value.to_string(),
+        });
+    }
+
+    0
+}
+
+/// Dump all variables.
+pub fn dumpvars(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    for super::ShellVar { name, value } in &state.shell_env {
+        println!("{}: \"{}\"", name, value);
+    }
+    0
+}
+
+/// Unset variable(s)
+pub fn unset(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 2 {
+        println!("sesh: {}: at least one variable required", args[0]);
+        println!("sesh: {0}: usage: {0} name [name ...]", args[0]);
+        return 1;
+    }
+    for (i, ele) in state.shell_env.clone().into_iter().enumerate() {
+        if args[1..].contains(&ele.name) {
+            state.shell_env.remove(i);
+        }
+    }
 
     0
 }

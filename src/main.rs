@@ -169,7 +169,7 @@ fn split_lines(lines: &str) -> Vec<String> {
         if ch == '\\' {
             escape_line = true;
         }
-        if i >= out.len() {
+        while i >= out.len() {
             out.push(String::new());
         }
         out[i].push(ch);
@@ -257,6 +257,9 @@ fn eval(statement: &str, state: &mut State) {
             let writer = raw_term.write().unwrap();
             let _ = writer.suspend_raw_mode();
         }
+        for env in &state.shell_env {
+            unsafe { std::env::set_var(env.name.clone(), env.value.clone()); }
+        }
         match std::process::Command::new(program_name.clone())
             .args(&statement_split[1..])
             .current_dir(state.working_dir.clone())
@@ -280,7 +283,17 @@ fn eval(statement: &str, state: &mut State) {
                 continue;
             }
             Err(error) => {
-                println!("sesh: error spawning program: {}\x0D", error);
+                println!("sesh: error spawning program: {}", error);
+                for (i, var) in state.shell_env.clone().into_iter().enumerate() {
+                    if var.name == "STATUS" {
+                        state.shell_env.swap_remove(i);
+                    }
+                }
+    
+                state.shell_env.push(ShellVar {
+                    name: "STATUS".to_string(),
+                    value: "127".to_string(),
+                });
                 if let Some(raw_term) = state.raw_term.clone() {
                     let writer = raw_term.write().unwrap();
                     let _ = writer.activate_raw_mode();
