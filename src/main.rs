@@ -2,15 +2,18 @@
 
 #![warn(missing_docs, clippy::missing_docs_in_private_items)]
 #![feature(cfg_match)]
+#![feature(slice_concat_trait)]
 
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsStr,
+    fmt::Display,
     io::{Read, Write},
     path::PathBuf,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
 };
 
 use clap::Parser;
+use termion::raw::IntoRawMode;
 
 mod builtins;
 mod escapes;
@@ -38,36 +41,60 @@ struct ShellVar {
 /// A lot of [ShellVar]s.
 type ShellVars = Vec<ShellVar>;
 
-/// A reference to a variable.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Variable {
-    /// A local variable.
-    Local(String),
-    /// A nonlocal variable.
-    Nonlocal(OsString),
-}
-
 /// A single alias
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Alias {
     /// alias from
     name: String,
     /// to
-    to: String
+    to: String,
 }
+
+/// A focus.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Focus {
+    /// A string focus
+    Str(String),
+    /// A vec focus
+    Vec(Vec<Focus>),
+}
+
+impl Display for Focus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Str(s) => {
+                f.write_fmt(format_args!("str:\"{}\"", s.clone().replace("\n", "\\n")))?;
+            }
+            Self::Vec(v) => {
+                f.write_fmt(format_args!(
+                    "list:[{}]",
+                    v.clone()
+                        .iter()
+                        .map(|v| format!("{}", v))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ))?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The state of the shell
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct State {
     /// Shell-local variables only accessible via builtins.
     shell_env: ShellVars,
-    /// The focused variable.
-    focus: Variable,
     /// The previous history of the states.
     history: Vec<State>,
     /// Current working directory.
     working_dir: PathBuf,
-    /// A list of aliases from name to actual
-    aliases: Vec<Alias>
+    /// A list of aliases from name to actual.
+    aliases: Vec<Alias>,
+    /// The focused variable
+    focus: Focus,
+    /// Raw terminal.
+    raw_term: Option<Arc<RwLock<termion::raw::RawTerminal<std::io::Stdout>>>>,
 }
 
 unsafe impl Sync for State {}
@@ -78,13 +105,18 @@ fn split_statement(statement: &str) -> Vec<String> {
     let mut out = vec![String::new()];
     let mut i: usize = 0;
     let mut in_str = (false, ' ');
+    let mut escape = false;
     for ch in statement.chars() {
-        if ['"', '\'', '`'].contains(&ch) {
+        if ch == '\\' && !in_str.0 {
+            escape = true;
+        }
+        if ['"', '\'', '`'].contains(&ch) && !escape {
             if in_str.0 && in_str.1 == ch {
                 in_str.0 = false
             } else {
                 in_str = (true, ch);
             }
+            escape = false;
             continue;
         }
         if !in_str.0 && ch == ' ' {
@@ -92,9 +124,11 @@ fn split_statement(statement: &str) -> Vec<String> {
             if i >= out.len() {
                 out.push(String::new());
             }
+            escape = false;
             continue;
         }
         out[i].push(ch);
+        escape = false;
     }
     out.iter()
         .map(|v| v.trim().to_string())
@@ -130,14 +164,13 @@ fn split_lines(lines: &str) -> Vec<String> {
     for ch in lines.chars() {
         if ch == '\n' && !escape_line {
             i += 1;
-            if i > out.len() {
-                out.push(String::new());
-            }
             continue;
         }
         if ch == '\\' {
             escape_line = true;
-            continue;
+        }
+        if i >= out.len() {
+            out.push(String::new());
         }
         out[i].push(ch);
     }
@@ -155,7 +188,11 @@ fn split_statements(statement: &str) -> Vec<String> {
         })
         .collect::<Vec<Vec<String>>>()
         .iter()
-        .map(|val| val.iter().map(|val| val.trim().to_string()).collect::<Vec<String>>())
+        .map(|val| {
+            val.iter()
+                .map(|val| val.trim().to_string())
+                .collect::<Vec<String>>()
+        })
         .collect::<Vec<Vec<String>>>()
         .concat()
 }
@@ -164,8 +201,9 @@ fn split_statements(statement: &str) -> Vec<String> {
 fn substitute_vars(statement: &str, state: State) -> String {
     let mut out = statement.to_string();
     for ShellVar { name, value } in state.shell_env {
-        out = out.replace(&("$".to_owned()+&name), &value);
+        out = out.replace(&("$".to_owned() + &name), &value);
     }
+    out = out.replace("!FOCUS", &format!("{}", state.focus));
     out
 }
 
@@ -186,18 +224,23 @@ fn eval(statement: &str, state: &mut State) {
             if program_name == alias.name {
                 let to_split = split_statement(&alias.to);
                 for (i, item) in to_split[1..].iter().enumerate() {
-                    statement_split.insert(i+1, (*item).clone());
+                    statement_split.insert(i + 1, (*item).clone());
                 }
                 program_name = to_split[0].clone();
                 continue;
             }
         }
 
-        if let Some(builtin) = builtins::BUILTINS
-            .iter()
-            .find(|v| v.0 == program_name)
-        {
+        if let Some(builtin) = builtins::BUILTINS.iter().find(|v| v.0 == program_name) {
+            if let Some(raw_term) = state.raw_term.clone() {
+                let writer = raw_term.write().unwrap();
+                let _ = writer.suspend_raw_mode();
+            }
             let status = builtin.1(statement_split, statement.to_string(), state);
+            if let Some(raw_term) = state.raw_term.clone() {
+                let writer = raw_term.write().unwrap();
+                let _ = writer.activate_raw_mode();
+            }
             for (i, var) in state.shell_env.clone().into_iter().enumerate() {
                 if var.name == "STATUS" {
                     state.shell_env.swap_remove(i);
@@ -209,6 +252,10 @@ fn eval(statement: &str, state: &mut State) {
                 value: status.to_string(),
             });
             continue;
+        }
+        if let Some(raw_term) = state.raw_term.clone() {
+            let writer = raw_term.write().unwrap();
+            let _ = writer.suspend_raw_mode();
         }
         match std::process::Command::new(program_name.clone())
             .args(&statement_split[1..])
@@ -226,10 +273,18 @@ fn eval(statement: &str, state: &mut State) {
                     name: "STATUS".to_string(),
                     value: child.wait().unwrap().code().unwrap().to_string(),
                 });
+                if let Some(raw_term) = state.raw_term.clone() {
+                    let writer = raw_term.write().unwrap();
+                    let _ = writer.activate_raw_mode();
+                }
                 continue;
             }
             Err(error) => {
-                println!("sesh: error spawning program: {}", error);
+                println!("sesh: error spawning program: {}\x0D", error);
+                if let Some(raw_term) = state.raw_term.clone() {
+                    let writer = raw_term.write().unwrap();
+                    let _ = writer.activate_raw_mode();
+                }
                 return;
             }
         }
@@ -277,17 +332,31 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// log data to a file
+#[allow(dead_code)]
+fn log_file(value: &str) {
+    let value = value.to_string() + "\n";
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::env::current_dir().unwrap().join("sesh.log"))
+        .unwrap()
+        .write_all(value.as_bytes())
+        .unwrap();
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = Args::parse();
 
     let mut state = State {
         shell_env: Vec::new(),
-        focus: Variable::Local(String::new()),
         history: Vec::new(),
+        focus: Focus::Str(String::new()),
         working_dir: std::env::current_dir()
             .unwrap_or(std::env::home_dir().unwrap_or(PathBuf::from("/"))),
         aliases: Vec::new(),
+        raw_term: None,
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT1".to_string(),
@@ -335,13 +404,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eval(&options.run_before, &mut state)
     }
 
-    let ctrlc_cont = Arc::new(RwLock::new(false));
-    let cc2 = ctrlc_cont.clone();
+    let mut history: Vec<String> = vec![];
+    let mut hist_ptr: usize = 0;
 
-    ctrlc::set_handler(move || {
-        (*cc2.write().unwrap()) = true;
-    })
-    .expect("Error setting Ctrl-C handler");
+    state.raw_term = Some(Arc::new(RwLock::new(std::io::stdout().into_raw_mode()?)));
+
     'mainloop: loop {
         write_prompt(state.clone())?;
 
@@ -349,8 +416,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut i0 = [0u8];
         let mut line_escape = false;
-        while i0[0] != b'\n' || line_escape {
-            if i0[0] == b'\n' {
+        let mut arrow_seq = [0u8; 2];
+        let mut in_arrow = (false, 0usize);
+        let mut curr_inp_hist = String::new();
+        let mut line_cursor = 0usize;
+        while i0[0] != b'\x0D' || line_escape {
+            if i0[0] == 27 {
+                in_arrow = (true, 0);
+            }
+            if i0[0] == b'\x0D' {
                 let prompt2 = state
                     .shell_env
                     .iter()
@@ -364,24 +438,122 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 print!("{}", prompt2);
                 std::io::stdout().flush()?;
             }
-            if ctrlc_cont.read().unwrap().to_owned() {
+            if i0[0] == 3 {
+                // ctrl+c
                 input.clear();
-                (*ctrlc_cont.write().unwrap()) = false;
-                println!();
+                println!("\x0D");
+                std::io::stdout().flush()?;
                 continue 'mainloop;
             }
             let amount = std::io::stdin().read(&mut i0).unwrap();
             if amount == 0 {
                 continue;
             }
-            if i0[0] != b'\n' {
+            if in_arrow.0 {
+                arrow_seq[in_arrow.1] = i0[0];
+                in_arrow.1 += 1;
+                if in_arrow.1 > 1 {
+                    in_arrow.0 = false;
+                    match arrow_seq {
+                        [91, 65] => {
+                            // up arrow
+                            if hist_ptr.checked_sub(1).is_some() {
+                                hist_ptr -= 1;
+                                let writer = state.raw_term.clone().unwrap();
+                                let mut writer = writer.write().unwrap();
+
+                                writer.write_all(b"\x0D")?;
+                                write_prompt(state.clone())?;
+                                writer.write_all(b"\x1b[0K")?;
+
+                                curr_inp_hist = input;
+
+                                input = history[hist_ptr].clone();
+                                writer.write_all(input.as_bytes())?;
+                                writer.flush()?;
+                            }
+                        }
+                        [91, 66] => {
+                            // down arrow
+                            if hist_ptr + 1 < history.len() {
+                                hist_ptr += 1;
+                                let writer = state.raw_term.clone().unwrap();
+                                let mut writer = writer.write().unwrap();
+
+                                writer.write_all(b"\x0D")?;
+                                write_prompt(state.clone())?;
+                                writer.write_all(b"\x1b[0K")?;
+
+                                input = history[hist_ptr].clone();
+                                writer.write_all(input.as_bytes())?;
+                                writer.flush()?;
+                            } else {
+                                hist_ptr = history.len();
+                                let writer = state.raw_term.clone().unwrap();
+                                let mut writer = writer.write().unwrap();
+
+                                writer.write_all(b"\x0D")?;
+                                write_prompt(state.clone())?;
+                                writer.write_all(b"\x1b[0K")?;
+
+                                input = curr_inp_hist.clone();
+                                writer.write_all(input.as_bytes())?;
+                                writer.flush()?;
+                            }
+                        }
+                        [91, 68] => {
+                            // left arrow
+                            if line_cursor.checked_sub(1).is_some() {
+                                let writer = state.raw_term.clone().unwrap();
+                                let mut writer = writer.write().unwrap();
+                                line_cursor -= 1;
+                                writer.write_all(b"\x1b[1D")?;
+                            } else {
+                                print!("\x07");
+                            }
+                        }
+                        [91, 67] => {
+                            // right arrow
+                            if line_cursor + 1 < input.len() {
+                                let writer = state.raw_term.clone().unwrap();
+                                let mut writer = writer.write().unwrap();
+                                line_cursor += 1;
+                                writer.write_all(b"\x1b[1C")?;
+                            } else {
+                                print!("\x07");
+                            }
+                        }
+                        _ => {
+                            continue;
+                        }
+                    }
+                }
+                continue;
+            }
+            if i0[0] != b'\x0D' {
                 line_escape = false;
             }
             if i0[0] == b'\\' {
                 line_escape = true;
             }
-            input.push(char::from_u32(i0[0] as u32).unwrap());
+            let raw_term = state.raw_term.clone().unwrap();
+            let mut raw_term = raw_term.write().unwrap();
+            if i0[0] == b'\x7F' {
+                if input.pop().is_none() {
+                    raw_term.write_all(b"\x07")?;
+                } else {
+                    raw_term.write_all(b"\x08 \x08")?;
+                }
+            } else {
+                input.push(char::from_u32(i0[0] as u32).unwrap());
+                raw_term.write_all(&i0)?;
+            }
+            raw_term.flush()?;
         }
+
+        println!("\x0D");
+        history.push(input.clone().trim().to_string());
+        hist_ptr = history.len();
 
         eval(&input, &mut state);
     }

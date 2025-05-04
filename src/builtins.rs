@@ -1,20 +1,21 @@
 //! builtins to sesh
 #![allow(clippy::type_complexity)]
 
-use std::sync::{Arc, Mutex};
-
 /// List of builtins
 pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 6] = [
+); 8] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
     ("alias", alias, "[name] [value]"),
     ("help", help, ""),
     ("source", eval, "filename [arguments]"),
+    ("loadf", loadf, "filename [...]"),
+    ("splitf", splitf, "[character] [-e]"),
+
 ];
 
 /// Change the directory
@@ -32,7 +33,12 @@ pub fn cd(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 }
 
 /// Exit the shell
-pub fn exit(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
+pub fn exit(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if let Some(raw_term) = state.raw_term.clone() {
+        let writer = raw_term.write().unwrap();
+        let _ = writer.suspend_raw_mode();
+        state.raw_term = None;
+    }
     std::process::exit(0);
 }
 
@@ -89,7 +95,7 @@ pub fn help(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
     println!("Use `man sesh` to find out more about the shell in general.");
     println!("Use `man -k' or `info' to find out more about commands not in this list.");
     println!();
-    let mut builtins = BUILTINS.clone();
+    let mut builtins = BUILTINS;
     builtins.sort_by(|v1, v2| v1.0.cmp(v2.0));
 
     for builtin in builtins {
@@ -124,16 +130,76 @@ pub fn eval(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 
     let mut state2 = state.clone();
 
-    let mut i = 0usize;
-    for arg in &args[1..] {
+    for (i, arg) in args[1..].iter().enumerate() {
         state2.shell_env.push(super::ShellVar {
             name: format!("{}", i),
             value: arg.clone(),
         });
-        i += 1;
     }
 
     super::eval(&file, &mut state2);
+
+    0
+}
+
+/// Load a file into the focused variable.
+pub fn loadf(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 2 {
+        println!("sesh: {}: filename argument required", args[0]);
+        println!("sesh: {0}: usage: {0} filename", args[0]);
+        return 1;
+    }
+    let path = args[1..].concat().clone();
+
+    let file = std::fs::read(path);
+    if file.is_err() {
+        println!(
+            "sesh: {}: error opening file: {}",
+            args[0],
+            file.unwrap_err()
+        );
+        return 2;
+    }
+    let file = String::from_utf8(file.unwrap());
+    if file.is_err() {
+        println!("sesh: {}: invalid UTF-8: {}", args[0], file.unwrap_err());
+        return 3;
+    }
+    let file = file.unwrap();
+
+    state.focus = super::Focus::Str(file);
+
+    0
+}
+
+/// Split the focus on a character.
+pub fn splitf(mut args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() >= 3 && args[2] == "-e" {
+        let unescaped = super::escapes::interpret_escaped_string(&args[1]);
+        if unescaped.is_err() {
+            println!("sesh: splitf: invalid escape: {}", unescaped.unwrap_err());
+            return 1;
+        }
+        args[1] = unescaped.unwrap();
+    }
+    let split = args.get(1).unwrap_or(&" ".to_string()).clone();
+
+    fn split_into(focus: super::Focus, split: String) -> super::Focus {
+        match focus {
+            super::Focus::Str(s) => super::Focus::Vec(
+                s.split(&split)
+                    .map(|v| super::Focus::Str(v.to_string()))
+                    .collect::<Vec<super::Focus>>(),
+            ),
+            super::Focus::Vec(v) => super::Focus::Vec(
+                v.iter()
+                    .map(|v| split_into(v.clone(), split.clone()))
+                    .collect::<Vec<super::Focus>>(),
+            ),
+        }
+    }
+
+    state.focus = split_into(state.focus.clone(), split);
 
     0
 }
