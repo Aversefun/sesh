@@ -263,10 +263,12 @@ pub fn unset(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 /// Copy the focus to the clipboard.
 pub fn copyf(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
     let mut clipboard = arboard::Clipboard::new().unwrap();
-    clipboard.set_text(match &state.focus {
-        super::Focus::Str(s) => s.clone(),
-        super::Focus::Vec(_) => format!("{}", state.focus)
-    }).unwrap();
+    clipboard
+        .set_text(match &state.focus {
+            super::Focus::Str(s) => s.clone(),
+            super::Focus::Vec(_) => format!("{}", state.focus),
+        })
+        .unwrap();
     0
 }
 
@@ -281,7 +283,9 @@ pub fn pastef(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
         state.focus = super::Focus::Str(text);
         0
     } else {
-        unsafe { unreachable_unchecked(); }
+        unsafe {
+            unreachable_unchecked();
+        }
     }
 }
 
@@ -297,7 +301,7 @@ pub fn setf(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
             name: var.to_string(),
             value: match &state.focus {
                 super::Focus::Str(s) => s.clone(),
-                super::Focus::Vec(_) => format!("{}", state.focus)
+                super::Focus::Vec(_) => format!("{}", state.focus),
             },
         });
     }

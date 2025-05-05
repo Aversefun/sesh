@@ -280,7 +280,9 @@ fn eval(statement: &str, state: &mut State) {
             let _ = writer.suspend_raw_mode();
         }
         for env in &state.shell_env {
-            unsafe { std::env::set_var(env.name.clone(), env.value.clone()); }
+            unsafe {
+                std::env::set_var(env.name.clone(), env.value.clone());
+            }
         }
         match std::process::Command::new(program_name.clone())
             .args(&statement_split[1..])
@@ -311,7 +313,7 @@ fn eval(statement: &str, state: &mut State) {
                         state.shell_env.swap_remove(i);
                     }
                 }
-    
+
                 state.shell_env.push(ShellVar {
                     name: "STATUS".to_string(),
                     value: "127".to_string(),

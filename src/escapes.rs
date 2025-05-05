@@ -1,7 +1,7 @@
 //! Escape sequences
-//! 
+//!
 //! Thanks, stack overflow!
-//! 
+//!
 //! (modifications were made)
 
 use std::fmt::Display;
@@ -14,18 +14,17 @@ pub enum EscapeError {
     /// unknown unicode character in a \u escape
     InvalidUnicodeChar(char),
     /// invalid unicode codepoint
-    InvalidUnicodeCodepoint(u32)
+    InvalidUnicodeCodepoint(u32),
 }
 
 impl Display for EscapeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EscapeError::EscapeAtEndOfString => {
-                f.write_str("escape at end of statement")
-            },
-            EscapeError::InvalidUnicodeChar(c) => {
-                f.write_fmt(format_args!("invalid character in a unicode escape: {}", *c))
-            },
+            EscapeError::EscapeAtEndOfString => f.write_str("escape at end of statement"),
+            EscapeError::InvalidUnicodeChar(c) => f.write_fmt(format_args!(
+                "invalid character in a unicode escape: {}",
+                *c
+            )),
             EscapeError::InvalidUnicodeCodepoint(c) => {
                 f.write_fmt(format_args!("invalid unicode codepoint in escape: {}", *c))
             }
@@ -56,20 +55,22 @@ impl<'a> Iterator for InterpretEscapedString<'a> {
                 Some('\n') => {
                     ret_next = true;
                     Err(EscapeError::EscapeAtEndOfString)
-                },
+                }
                 Some('u') | Some('U') | Some('x') => {
                     let code = [self.s.next(), self.s.next(), self.s.next(), self.s.next()];
                     if code.iter().any(|val| val.is_none()) {
                         return Err(EscapeError::EscapeAtEndOfString);
                     }
                     let code = TryInto::<[char; 4]>::try_into(
-                        code.iter().map(|ch| ch.unwrap().to_ascii_lowercase()).collect::<Vec<char>>(),
+                        code.iter()
+                            .map(|ch| ch.unwrap().to_ascii_lowercase())
+                            .collect::<Vec<char>>(),
                     )
                     .unwrap();
 
                     for c in code {
                         if !(c.is_numeric() || ['a', 'b', 'c', 'd', 'e', 'f'].contains(&c)) {
-                            return Err(EscapeError::InvalidUnicodeChar(c))
+                            return Err(EscapeError::InvalidUnicodeChar(c));
                         }
                     }
 
@@ -79,16 +80,12 @@ impl<'a> Iterator for InterpretEscapedString<'a> {
                         return Err(EscapeError::InvalidUnicodeCodepoint(code));
                     }
                     Ok(out.unwrap())
-                },
+                }
                 Some(c) => Ok(c),
             },
             c => Ok(c),
         });
-        if ret_next {
-            self.next()
-        } else {
-            out
-        }
+        if ret_next { self.next() } else { out }
     }
 }
 

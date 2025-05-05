@@ -7,7 +7,7 @@ fn main() {
         "cargo:rustc-env=TARGET={}",
         std::env::var("TARGET").unwrap()
     );
-    
+
     let page = Roff::new()
         .control("TH", ["SESH", "1"])
         .control("SH", ["NAME"])
