@@ -3,6 +3,7 @@
 #![warn(missing_docs, clippy::missing_docs_in_private_items)]
 #![feature(cfg_match)]
 #![feature(slice_concat_trait)]
+#![feature(test)]
 
 use std::{
     ffi::OsStr,
@@ -17,6 +18,8 @@ use termion::raw::IntoRawMode;
 
 mod builtins;
 mod escapes;
+#[cfg(test)]
+mod tests;
 
 /// sesh is a shell designed to be as semantic to use as possible
 #[derive(Parser, Debug)]
@@ -85,8 +88,6 @@ impl Display for Focus {
 struct State {
     /// Shell-local variables only accessible via builtins.
     shell_env: ShellVars,
-    /// The previous history of the states.
-    history: Vec<State>,
     /// Current working directory.
     working_dir: PathBuf,
     /// A list of aliases from name to actual.
@@ -103,20 +104,37 @@ unsafe impl Send for State {}
 /// Split a statement.
 fn split_statement(statement: &str) -> Vec<String> {
     let mut out = vec![String::new()];
-    let mut i: usize = 0;
+    let mut i = 0usize;
     let mut in_str = (false, ' ');
     let mut escape = false;
+    let mut f = 0usize;
     for ch in statement.chars() {
         if ch == '\\' && !in_str.0 {
             escape = true;
         }
-        if ['"', '\'', '`'].contains(&ch) && !escape {
-            if in_str.0 && in_str.1 == ch {
-                in_str.0 = false
-            } else {
-                in_str = (true, ch);
+        if in_str.0 && in_str.1 == ch {
+            in_str.0 = false;
+            if ch == ']' {
+                out[i].push(ch);
             }
             escape = false;
+            f += 1;
+            continue;
+        }
+        if !(!['"', '\'', '`', '(', '['].contains(&ch) || escape || in_str.0 || ch == '[' && f <= 1)
+        {
+            in_str = (true, ch);
+            if ch == '(' {
+                in_str.1 = ')';
+            }
+            if ch == '[' {
+                in_str.1 = ']';
+            }
+            if ch == '[' {
+                out[i].push(ch);
+            }
+            escape = false;
+            f += 1;
             continue;
         }
         if !in_str.0 && ch == ' ' {
@@ -125,10 +143,12 @@ fn split_statement(statement: &str) -> Vec<String> {
                 out.push(String::new());
             }
             escape = false;
+            f += 1;
             continue;
         }
         out[i].push(ch);
         escape = false;
+        f += 1;
     }
     out.iter()
         .map(|v| v.trim().to_string())
@@ -326,9 +346,6 @@ fn eval(statement: &str, state: &mut State) {
             }
         }
     }
-
-    let s = state.clone();
-    state.history.push(s);
 }
 
 /// Write the prompt to the screen.
@@ -388,7 +405,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut state = State {
         shell_env: Vec::new(),
-        history: Vec::new(),
         focus: Focus::Str(String::new()),
         working_dir: std::env::current_dir()
             .unwrap_or(std::env::home_dir().unwrap_or(PathBuf::from("/"))),

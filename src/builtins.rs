@@ -8,7 +8,7 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 15] = [
+); 17] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -24,6 +24,8 @@ pub const BUILTINS: [(
     ("pastef", pastef, ""),
     ("setf", setf, "var [var ...]"),
     ("getf", getf, "var"),
+    ("()", nop, ""),
+    ("if", _if, "condition ( statement ) [ ( else_statement )"),
 ];
 
 /// Change the directory
@@ -52,6 +54,10 @@ pub fn exit(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
 
 /// Echo a string
 pub fn echo(args: Vec<String>, mut unsplit_args: String, _: &mut super::State) -> i32 {
+    if args.len() == 1 {
+        println!();
+        return 0;
+    }
     unsplit_args = unsplit_args[(args[0].len() + 1)..].to_string();
     if args.len() != 1 && args[1] == "-e" {
         unsplit_args = unsplit_args[3..].to_string();
@@ -323,5 +329,37 @@ pub fn getf(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
         }
     }
     state.focus = super::Focus::Str(val);
+    0
+}
+
+/// Empty function that does nothing. Mainly used for benchmarking evaluating.
+pub fn nop(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
+    0
+}
+
+/// if statement
+pub fn _if(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 3 {
+        println!(
+            "sesh: {0}: usage: {0} condition (statement) [ (else_statement) ]",
+            args[0]
+        );
+        return 1;
+    }
+    super::eval(&args[1].clone(), state);
+    state.shell_env.reverse();
+    let mut status = 0i32;
+    for var in &state.shell_env {
+        if var.name == "STATUS" {
+            status = var.value.parse().unwrap();
+        }
+    }
+    state.shell_env.sort_by(|v1, v2| v1.name.cmp(&v2.name));
+    if status == 0 {
+        super::eval(&args[2].clone(), state);
+    } else if args.len() == 8 {
+        super::eval(&args[3].clone(), state);
+    }
+
     0
 }
