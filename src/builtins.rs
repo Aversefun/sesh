@@ -1,12 +1,14 @@
 //! builtins to sesh
 #![allow(clippy::type_complexity)]
 
+use std::hint::unreachable_unchecked;
+
 /// List of builtins
 pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 12] = [
+); 13] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -18,7 +20,8 @@ pub const BUILTINS: [(
     ("set", set, "name=value [name=value ...]"),
     ("dumpvars", dumpvars, ""),
     ("unset", unset, "var [var ...]"),
-    ("copyf", copyf, "")
+    ("copyf", copyf, ""),
+    ("pastef", pastef, "")
 ];
 
 /// Change the directory
@@ -263,4 +266,19 @@ pub fn copyf(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
         super::Focus::Vec(_) => format!("{}", state.focus)
     }).unwrap();
     0
+}
+
+/// Paste from the clipboard into the focus.
+pub fn pastef(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    let mut clipboard = arboard::Clipboard::new().unwrap();
+    let text = clipboard.get_text();
+    if let Err(e) = text {
+        println!("sesh: {}: get clipboard text error: {}", args[0], e);
+        1
+    } else if let Ok(text) = text {
+        state.focus = super::Focus::Str(text);
+        0
+    } else {
+        unsafe { unreachable_unchecked(); }
+    }
 }
