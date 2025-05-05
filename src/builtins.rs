@@ -6,7 +6,7 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 11] = [
+); 12] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -18,6 +18,7 @@ pub const BUILTINS: [(
     ("set", set, "name=value [name=value ...]"),
     ("dumpvars", dumpvars, ""),
     ("unset", unset, "var [var ...]"),
+    ("copyf", copyf, "")
 ];
 
 /// Change the directory
@@ -251,5 +252,15 @@ pub fn unset(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
         }
     }
 
+    0
+}
+
+/// Copy the focus to the clipboard.
+pub fn copyf(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    let mut clipboard = arboard::Clipboard::new().unwrap();
+    clipboard.set_text(match &state.focus {
+        super::Focus::Str(s) => s.clone(),
+        super::Focus::Vec(_) => format!("{}", state.focus)
+    }).unwrap();
     0
 }
