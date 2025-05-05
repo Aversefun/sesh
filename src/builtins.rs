@@ -8,7 +8,7 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 13] = [
+); 15] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -21,7 +21,9 @@ pub const BUILTINS: [(
     ("dumpvars", dumpvars, ""),
     ("unset", unset, "var [var ...]"),
     ("copyf", copyf, ""),
-    ("pastef", pastef, "")
+    ("pastef", pastef, ""),
+    ("setf", setf, "var [var ...]"),
+    ("getf", getf, "var"),
 ];
 
 /// Change the directory
@@ -281,4 +283,41 @@ pub fn pastef(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
     } else {
         unsafe { unreachable_unchecked(); }
     }
+}
+
+/// Set a variable to the contents of the focus.
+pub fn setf(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 2 {
+        println!("sesh: {}: at least one variable required", args[0]);
+        println!("sesh: {0}: usage: {0} var [var ...]", args[0]);
+        return 1;
+    }
+    for var in &args[1..] {
+        state.shell_env.push(super::ShellVar {
+            name: var.to_string(),
+            value: match &state.focus {
+                super::Focus::Str(s) => s.clone(),
+                super::Focus::Vec(_) => format!("{}", state.focus)
+            },
+        });
+    }
+    0
+}
+
+/// Set the focus to the contents of a variable
+pub fn getf(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() != 2 {
+        println!("sesh: {}: exactly one variable required", args[0]);
+        println!("sesh: {0}: usage: {0} var", args[0]);
+        return 1;
+    }
+    let mut val = String::new();
+    for var in &state.shell_env {
+        if var.name == args[1].clone() {
+            val = var.value.clone();
+            break;
+        }
+    }
+    state.focus = super::Focus::Str(val);
+    0
 }

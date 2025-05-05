@@ -207,6 +207,27 @@ fn substitute_vars(statement: &str, state: State) -> String {
     out
 }
 
+/// remove duplicates, keeping later ones
+fn garbage_collect_vars(state: &mut State) {
+    state.shell_env.reverse();
+    let mut seen = vec![];
+    let mut remove_indexes = vec![];
+    let mut i = 0usize;
+    for var in &mut state.shell_env {
+        if seen.contains(&var.name) {
+            remove_indexes.push(i);
+            i += 1;
+            continue;
+        }
+        seen.push(var.name.clone());
+        i += 1;
+    }
+    for i in remove_indexes {
+        state.shell_env.remove(i);
+    }
+    state.shell_env.sort_by(|v1, v2| v1.name.cmp(&v2.name));
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 /// Evaluate a statement. May include multiple.
 fn eval(statement: &str, state: &mut State) {
@@ -237,6 +258,7 @@ fn eval(statement: &str, state: &mut State) {
                 let _ = writer.suspend_raw_mode();
             }
             let status = builtin.1(statement_split, statement.to_string(), state);
+            garbage_collect_vars(state);
             if let Some(raw_term) = state.raw_term.clone() {
                 let writer = raw_term.write().unwrap();
                 let _ = writer.activate_raw_mode();
