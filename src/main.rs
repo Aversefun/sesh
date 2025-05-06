@@ -10,6 +10,7 @@ use std::{
     ffi::OsStr,
     fmt::Display,
     io::{Read, Write},
+    os::fd::FromRawFd,
     path::PathBuf,
     sync::{Arc, RwLock},
 };
@@ -109,7 +110,7 @@ unsafe impl Sync for State {}
 unsafe impl Send for State {}
 
 /// Split a statement.
-fn split_statement(statement: &str) -> Vec<String> {
+fn split_statement(statement: &str) -> Vec<Result<IndirectRes, &str>> {
     let mut out = vec![String::new()];
     let mut i = 0usize;
     let mut in_str = (false, ' ');
@@ -165,7 +166,98 @@ fn split_statement(statement: &str) -> Vec<String> {
     }
     out.iter()
         .map(|v| v.trim().to_string())
-        .collect::<Vec<String>>()
+        .map(|v| is_indirect(v))
+        .collect::<Vec<Result<IndirectRes, &str>>>()
+}
+
+/// An indirect to the value.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+enum Indirect {
+    /// default to
+    #[default]
+    Default,
+    /// Redirect to stdout(not for stdin!)
+    Stdout,
+    /// Redirect to stderr(not for stdin!)
+    Stderr,
+    /// Redirect to/from a file descriptor
+    Fd(i32),
+    /// Redirect to/from a path
+    Path(PathBuf),
+    /// Redirect to the next statement
+    NextStatement,
+    /// Redirect from the previous statement
+    PrevStatement,
+}
+
+/// A result from [is_indirect]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum IndirectRes {
+    /// Isn't a indirect; the part
+    Statement(String),
+    /// TO stdin
+    Stdin(Indirect),
+    /// FROM stdout
+    Stdout(Indirect),
+    /// FROM stderr
+    Stderr(Indirect),
+}
+
+impl IndirectRes {
+    /// get the statement value or panic if not
+    fn unwrap_statement(self) -> String {
+        if let Self::Statement(v) = self {
+            v
+        } else {
+            panic!("IndirectRes is not statement");
+        }
+    }
+
+    /// return whether self is a statement
+    fn is_statement(&self) -> bool {
+        matches!(self, Self::Statement(_))
+    }
+}
+
+/// Return whether a statement is a indirect pointer and if it is what to.
+fn is_indirect(statement: String) -> Result<IndirectRes, &'static str> {
+    fn is_indirect_inner(i: (&str, &str)) -> Indirect {
+        if i.1.is_empty() {
+            if i.0 == "0" {
+                Indirect::PrevStatement
+            } else {
+                Indirect::NextStatement
+            }
+        } else if i.0 == "0" {
+            if let Ok(n) = i.1.parse::<std::os::fd::RawFd>() {
+                Indirect::Fd(n)
+            } else {
+                Indirect::Path(PathBuf::from(i.1))
+            }
+        } else {
+            match i.1 {
+                "1" => Indirect::Stdout,
+                "2" => Indirect::Stderr,
+                v => {
+                    if let Ok(n) = v.parse::<std::os::fd::RawFd>() {
+                        Indirect::Fd(n)
+                    } else {
+                        Indirect::Path(PathBuf::from(v))
+                    }
+                }
+            }
+        }
+    }
+    if let Some(i) = statement.split_once("@") {
+        match i.0 {
+            "0" => Ok(IndirectRes::Stdin(is_indirect_inner(i))),
+            "1" => Ok(IndirectRes::Stdout(is_indirect_inner(i))),
+            "2" => Ok(IndirectRes::Stderr(is_indirect_inner(i))),
+            _ => Err("unknown indirect from"),
+        }
+    } else {
+        Ok(IndirectRes::Statement(statement))
+    }
 }
 
 /// Removes comments from a statement
@@ -268,7 +360,46 @@ fn eval(statement: &str, state: &mut State) {
     let statements = split_statements(&substitute_vars(&statement, state.clone()));
 
     for statement in statements {
-        let mut statement_split = split_statement(&statement);
+        let statement_split = split_statement(&statement);
+        if let Some(e) = statement_split.iter().find(|v| v.is_err()) {
+            println!("sesh: {}\r", e.clone().unwrap_err());
+            return;
+        }
+        let statement_split = statement_split
+            .iter()
+            .map(|v| v.clone().unwrap())
+            .collect::<Vec<IndirectRes>>();
+
+        if !statement_split[0].is_statement() {
+            println!("sesh: program name is indirect\r");
+            return;
+        }
+
+        let mut indirects = statement_split
+            .clone()
+            .into_iter()
+            .filter(|v| !v.is_statement())
+            .collect::<Vec<IndirectRes>>();
+        indirects.sort_by(|v1, v2| {
+            if matches!(v1, IndirectRes::Stderr(_)) && matches!(v2, IndirectRes::Stderr(_)) {
+                return std::cmp::Ordering::Equal;
+            }
+            if matches!(v1, IndirectRes::Stdout(_)) && matches!(v2, IndirectRes::Stdout(_)) {
+                return std::cmp::Ordering::Equal;
+            }
+            if matches!(v1, IndirectRes::Stdin(_)) && matches!(v2, IndirectRes::Stdin(_)) {
+                return std::cmp::Ordering::Equal;
+            }
+            v1.cmp(v2)
+        });
+        indirects.dedup();
+
+        let mut statement_split = statement_split
+            .into_iter()
+            .filter(|v| v.is_statement())
+            .map(|v| v.unwrap_statement())
+            .collect::<Vec<String>>();
+
         if statement.is_empty() || statement_split[0].is_empty() {
             continue;
         }
@@ -276,7 +407,13 @@ fn eval(statement: &str, state: &mut State) {
 
         for alias in &state.aliases {
             if program_name == alias.name {
-                let to_split = split_statement(&alias.to);
+                let to_split = split_statement(&alias.to)
+                    .iter()
+                    .filter_map(|v| v.clone().ok())
+                    .filter(|v| v.is_statement())
+                    .map(|v| v.unwrap_statement())
+                    .collect::<Vec<String>>();
+
                 for (i, item) in to_split[1..].iter().enumerate() {
                     statement_split.insert(i + 1, (*item).clone());
                 }
@@ -289,6 +426,9 @@ fn eval(statement: &str, state: &mut State) {
             if let Some(raw_term) = state.raw_term.clone() {
                 let writer = raw_term.write().unwrap();
                 let _ = writer.suspend_raw_mode();
+            }
+            if indirects.len() > 1 {
+                println!("sesh: warning: indirects ignored for builtin")
             }
             let status = builtin.1(statement_split, statement.to_string(), state);
             garbage_collect_vars(state);
@@ -317,11 +457,77 @@ fn eval(statement: &str, state: &mut State) {
                 std::env::set_var(env.name.clone(), env.value.clone());
             }
         }
-        match std::process::Command::new(program_name.clone())
+        let mut command = std::process::Command::new(program_name.clone());
+        command
             .args(&statement_split[1..])
-            .current_dir(state.working_dir.clone())
-            .spawn()
-        {
+            .current_dir(state.working_dir.clone());
+        for indirect in indirects {
+            match indirect {
+                IndirectRes::Statement(_) => (),
+                IndirectRes::Stderr(i) => match i {
+                    Indirect::Default => (),
+                    Indirect::Fd(fd) => {
+                        command.stderr(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) });
+                    }
+                    Indirect::NextStatement => todo!(),
+                    Indirect::Path(p) => {
+                        command.stderr(
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(p)
+                                .unwrap(),
+                        );
+                    },
+                    Indirect::PrevStatement => todo!(),
+                    Indirect::Stderr => (),
+                    Indirect::Stdout => {
+                        command.stderr(std::io::stdout());
+                    }
+                },
+                IndirectRes::Stdout(i) => match i {
+                    Indirect::Default => (),
+                    Indirect::Fd(fd) => {
+                        command.stdout(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) });
+                    }
+                    Indirect::NextStatement => todo!(),
+                    Indirect::Path(p) => {
+                        command.stdout(
+                            std::fs::OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(p)
+                                .unwrap(),
+                        );
+                    },
+                    Indirect::PrevStatement => todo!(),
+                    Indirect::Stderr => {
+                        command.stdout(std::io::stderr());
+                    },
+                    Indirect::Stdout => ()
+                },
+                IndirectRes::Stdin(i) => match i {
+                    Indirect::Default => (),
+                    Indirect::Fd(fd) => {
+                        command.stdin(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) });
+                    }
+                    Indirect::NextStatement => todo!(),
+                    Indirect::Path(p) => {
+                        command.stdin(
+                            std::fs::OpenOptions::new()
+                                .read(true)
+                                .open(p)
+                                .unwrap(),
+                        );
+                    },
+                    Indirect::PrevStatement => todo!(),
+                    Indirect::Stderr => (),
+                    Indirect::Stdout => ()
+                }
+            }
+        }
+
+        match command.spawn() {
             Ok(mut child) => {
                 for (i, var) in state.shell_env.clone().into_iter().enumerate() {
                     if var.name == "STATUS" {
@@ -429,16 +635,24 @@ fn log_file(value: &str) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = Args::parse();
 
-    if let Some(filename) = std::env::args().next() && options.run_before.is_empty() && options.run_expr.is_empty() {
+    let mut args = std::env::args();
+    let _ = args.next();
+
+    if let Some(filename) = args.next()
+        && options.run_before.is_empty()
+        && options.run_expr.is_empty()
+    {
         let rc = std::fs::read(filename.clone());
         if rc.is_err() {
             println!("sesh: reading {} failed: {}", filename, rc.unwrap_err());
-            println!("sesh: exiting")
+            println!("sesh: exiting");
+            return Ok(());
         } else {
             let rc = String::from_utf8(rc.unwrap());
             if rc.is_err() {
                 println!("sesh: reading {} failed: not valid UTF-8", filename);
-                println!("sesh: exiting")
+                println!("sesh: exiting");
+                return Ok(());
             } else {
                 let rc = rc.unwrap();
                 options.run_expr = rc;

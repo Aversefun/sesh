@@ -18,37 +18,45 @@ fn main() {
         .text([
             bold("Sesh"),
             roman(
-                "is a shell designed to be as semantic to use as possible. It isn't completely compatible\
-                with sh(yet) however the point is for it to be easily usable and understandable by humans. It can\
+                " is a shell designed to be as semantic to use as possible. It isn't completely compatible \
+                with sh(yet) however the point is for it to be easily usable and understandable by humans. It can \
                 interpret commands from standard input or from a file."
             ),
         ])
         .control("SH", ["OPTIONS"])
         .text([
-            bold("-c, --run"), roman("\tIf this option is present, then commands are read from the\
-            argument provided to it and executed in a non-interactive environment(a shell will not be opened after\
-            they are done executing).\n"),
-            bold("-b, --before"), roman("\tIf this option is present, then commands are read from the\
-            argument provided to it and executed in an interactive environment(a shell WILL be opened after they\
+            bold("-c, --run "), roman("\tIf this option is present, then commands are read from the \
+            argument provided to it and executed in a non-interactive environment(a shell will not be opened after \
+            they are done executing).\n")
+        ])
+        .text([
+            bold("-b, --before"), roman("\tIf this option is present, then commands are read from the \
+            argument provided to it and executed in an interactive environment(a shell WILL be opened after they \
             are done executing).\n")
         ])
         .control("SH", ["ARGUMENTS"])
         .text(
             [
-                roman("If arguments remain after option processing and neither -c nor -b have been supplied,\
+                roman("If arguments remain after option processing and neither -c nor -b have been supplied, \
                 the first argument is assumed to be the name of a shell file.")
             ]
         )
         .control("SH", ["FILES"])
         .text(
             [
-                bold("Sesh"), roman(" reads from and writes to a couple of files depending on the circumstances:\n\
-                .seshrc - Executed upon startup \n\
-                .sesh_history - Contains commands previously ran, one per line. Read upon startup in an interactive shell and\
-                    written to after each command.\n\
-                Other files - Scripts may write to files via other methods, including outside tools. Scripts may be read from\
-                the path in the first argument of the shell after options.")
+                bold("Sesh"), roman(" reads from and writes to a couple of files depending on the circumstances:\n")
             ]
+        )
+        .text(
+            [bold(".seshrc"), roman(" - Executed upon startup\n")]
+        )
+        .text(
+            [bold(".sesh_history"), roman(" - Contains commands previously ran, one per line. \
+                Read upon startup in an interactive shell and written to after each command.\n")]
+        )
+        .text(
+            [bold("Other files"), roman(" - Scripts may write to files via other methods, \
+            including outside tools. Scripts may be read from the path in the first argument of the shell after options.")]
         )
         .render();
     std::fs::write(
