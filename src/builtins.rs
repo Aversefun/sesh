@@ -8,26 +8,107 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
+    &str,
 ); 19] = [
-    ("cd", cd, "[dir]"),
-    ("exit", exit, ""),
-    ("echo", echo, "[-e] [text ...]"),
-    ("alias", alias, "[name] [value]"),
-    ("help", help, ""),
-    ("source", eval, "filename [arguments]"),
-    ("loadf", loadf, "filename [...]"),
-    ("splitf", splitf, "[character] [-e]"),
-    ("set", set, "name=value [name=value ...]"),
-    ("dumpvars", dumpvars, ""),
-    ("unset", unset, "var [var ...]"),
-    ("copyf", copyf, ""),
-    ("pastef", pastef, ""),
-    ("setf", setf, "var [var ...]"),
-    ("getf", getf, "var"),
-    ("()", nop, ""),
-    ("if", _if, "condition (statement) [ (else_statement)"),
-    ("while", _while, "condition (statement)"),
-    ("gay", gay, "")
+    (
+        "cd",
+        cd,
+        "[dir]",
+        "Change the current directory into the specified one. If unspecified, change the directory into the user's home directory.",
+    ),
+    ("exit", exit, "", "Exit the shell."),
+    (
+        "echo",
+        echo,
+        "[-e] [text ...]",
+        "Output the specified text. If -e is passed, parse escape characters.",
+    ),
+    (
+        "alias",
+        alias,
+        "name=value [name=value ...]",
+        "Create one or more command aliases. Command line arguments may be passed to the value.",
+    ),
+    (
+        "help",
+        help,
+        "[command]",
+        "Hey, that's me! Get help on a specified builtin or without arguments list all of the available builtin commands.",
+    ),
+    (
+        "source",
+        eval,
+        "filename [arguments]",
+        "Evaluate the contents of a file, optionally passing arguments in variables $1 and up.",
+    ),
+    (
+        "loadf",
+        loadf,
+        "filename [...]",
+        "Load the contents of a file into the focus.",
+    ),
+    (
+        "splitf",
+        splitf,
+        "[character] [-e]",
+        "Split the contents of the focus. If -e is passed, parse escapes.",
+    ),
+    (
+        "set",
+        set,
+        "name=value [name=value ...]",
+        "Set one or more variables to values.",
+    ),
+    ("dumpvars", dumpvars, "", "List all variables."),
+    (
+        "unset",
+        unset,
+        "var [var ...]",
+        "Unset one or more variables.",
+    ),
+    (
+        "copyf",
+        copyf,
+        "",
+        "Copy the contents of the focus to your clipboard.",
+    ),
+    (
+        "pastef",
+        pastef,
+        "",
+        "Paste the contents of your clipboard into the focus.",
+    ),
+    (
+        "setf",
+        setf,
+        "var [var ...]",
+        "Set one or more variables to the contents of the focus.",
+    ),
+    (
+        "getf",
+        getf,
+        "var",
+        "Set the focus to the contents of a variable.",
+    ),
+    ("()", nop, "", "Do nothing and return a status code of 0."),
+    (
+        "if",
+        _if,
+        "condition (statement) [ (else_statement) ]",
+        "If [condition] returns a status of 0, do (statement). Else, do (else_statement).",
+    ),
+    (
+        "while",
+        _while,
+        "condition (statement)",
+        "While [condition] returns a status of 0, do (statement).",
+    ),
+    (
+        "gay",
+        gay,
+        "",
+        "Change the colors of the terminal to cycle through the pride flag colors!",
+    ),
 ];
 
 /// Change the directory
@@ -101,22 +182,60 @@ pub fn alias(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 }
 
 /// Output help on builtins.
-pub fn help(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
+pub fn help(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() >= 2 {
+        for builtin in BUILTINS {
+            if builtin.0 == args[1] {
+                println!("{} {}: {}", builtin.0, builtin.2, builtin.3);
+            }
+        }
+        return 0;
+    }
     println!(
-        "sesh, version {} ({})",
+        "{}sesh, version {} ({})",
+        if state.in_mode {
+            "\x1b[31;1m"
+        } else {
+            ""
+        },
         env!("CARGO_PKG_VERSION"),
         env!("TARGET")
     );
-    println!("This provides a list of built-in shell commands.");
-    println!("Use `man sesh` to find out more about the shell in general.");
-    println!("Use `man -k' or `info' to find out more about commands not in this list.");
+    println!("{}This provides a list of built-in shell commands.", if state.in_mode {
+        "\x1b[38;2;255;165;0m"
+    } else {
+        ""
+    });
+    println!("{}Use `man sesh` to find out more about the shell in general.", if state.in_mode {
+        "\x1b[33;1m"
+    } else {
+        ""
+    });
+    println!("{}Use `man -k' or `info' to find out more about commands not in this list.", if state.in_mode {
+        "\x1b[32;1m"
+    } else {
+        ""
+    });
     println!();
     let mut builtins = BUILTINS;
     builtins.sort_by(|v1, v2| v1.0.cmp(v2.0));
 
-    for builtin in builtins {
+    for (i, builtin) in builtins.iter().enumerate() {
         if builtin.0 == "gay" {
             continue;
+        }
+        if state.in_mode {
+            let table = [
+                "\x1b[34;1m",
+                "\x1b[36;1m",
+                "\x1b[35;1m",
+                "\x1b[31;1m",
+                "\x1b[38;2;255;165;0m",
+                "\x1b[33;1m",
+                "\x1b[32;1m",
+            ];
+            let idx = i%table.len();
+            print!("{}", table[idx]);
         }
         println!("{} {}", builtin.0, builtin.2);
     }
@@ -372,10 +491,7 @@ pub fn _if(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 /// loop while a condition is true
 pub fn _while(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
     if args.len() < 3 {
-        println!(
-            "sesh: {0}: usage: {0} condition (statement)",
-            args[0]
-        );
+        println!("sesh: {0}: usage: {0} condition (statement)", args[0]);
         return 1;
     }
 

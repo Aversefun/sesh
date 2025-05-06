@@ -112,6 +112,7 @@ fn split_statement(statement: &str) -> Vec<String> {
     let mut in_str = (false, ' ');
     let mut escape = false;
     let mut f = 0usize;
+    let mut str_idx = usize::MAX;
     for ch in statement.chars() {
         if ch == '\\' && !in_str.0 {
             escape = true;
@@ -119,6 +120,10 @@ fn split_statement(statement: &str) -> Vec<String> {
         if in_str.0 && in_str.1 == ch {
             in_str.0 = false;
             if ch == ']' {
+                out[i].push(ch);
+            }
+            if ch == ')' && f == str_idx+1 {
+                out[i].push('(');
                 out[i].push(ch);
             }
             escape = false;
@@ -138,6 +143,7 @@ fn split_statement(statement: &str) -> Vec<String> {
                 out[i].push(ch);
             }
             escape = false;
+            str_idx = f;
             f += 1;
             continue;
         }
