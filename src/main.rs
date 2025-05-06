@@ -4,6 +4,7 @@
 #![feature(cfg_match)]
 #![feature(slice_concat_trait)]
 #![feature(test)]
+#![feature(let_chains)]
 
 use std::{
     ffi::OsStr,
@@ -426,7 +427,24 @@ fn log_file(value: &str) {
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let options = Args::parse();
+    let mut options = Args::parse();
+
+    if let Some(filename) = std::env::args().next() && options.run_before.is_empty() && options.run_expr.is_empty() {
+        let rc = std::fs::read(filename.clone());
+        if rc.is_err() {
+            println!("sesh: reading {} failed: {}", filename, rc.unwrap_err());
+            println!("sesh: exiting")
+        } else {
+            let rc = String::from_utf8(rc.unwrap());
+            if rc.is_err() {
+                println!("sesh: reading {} failed: not valid UTF-8", filename);
+                println!("sesh: exiting")
+            } else {
+                let rc = rc.unwrap();
+                options.run_expr = rc;
+            }
+        }
+    }
 
     let mut state = State {
         shell_env: Vec::new(),
