@@ -99,7 +99,7 @@ struct State {
     /// sh
     in_mode: bool,
     /// sh
-    entries: usize
+    entries: usize,
 }
 
 unsafe impl Sync for State {}
@@ -122,7 +122,7 @@ fn split_statement(statement: &str) -> Vec<String> {
             if ch == ']' {
                 out[i].push(ch);
             }
-            if ch == ')' && f == str_idx+1 {
+            if ch == ')' && f == str_idx + 1 {
                 out[i].push('(');
                 out[i].push(ch);
             }
@@ -398,9 +398,9 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
             "\x1b[32;1m",
             "\x1b[34;1m",
             "\x1b[36;1m",
-            "\x1b[35;1m"
+            "\x1b[35;1m",
         ];
-        let idx = state.entries.saturating_sub(1)%table.len();
+        let idx = state.entries.saturating_sub(1) % table.len();
         prompt += table[idx];
     }
 
@@ -434,7 +434,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         aliases: Vec::new(),
         raw_term: None,
         in_mode: false,
-        entries: 0
+        entries: 0,
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT1".to_string(),
@@ -483,8 +483,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eval(&options.run_before, &mut state)
     }
 
-    let mut history: Vec<String> = vec![];
-    let mut hist_ptr: usize = 0;
+    let mut history: Vec<String> =
+        std::fs::read_to_string(std::env::home_dir().unwrap().join(".sesh_history"))
+            .unwrap_or_default()
+            .split("\n")
+            .map(|v| v.to_string())
+            .collect();
+    let mut hist_ptr: usize = history.len();
 
     state.raw_term = Some(Arc::new(RwLock::new(std::io::stdout().into_raw_mode()?)));
 
@@ -631,7 +636,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         println!("\x0D");
-        history.push(input.clone().trim().to_string());
+        input = input.clone().trim().to_string();
+        history.push(input.clone());
+
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::home_dir().unwrap().join(".sesh_history"))
+            .unwrap()
+            .write_all((input.clone() + "\n").into_bytes().as_slice())
+            .unwrap();
+
         hist_ptr = history.len();
 
         state.entries += 1;

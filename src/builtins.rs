@@ -194,29 +194,26 @@ pub fn help(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
     }
     println!(
         "{}sesh, version {} ({})",
-        if state.in_mode {
-            "\x1b[31;1m"
-        } else {
-            ""
-        },
+        if state.in_mode { "\x1b[31;1m" } else { "" },
         env!("CARGO_PKG_VERSION"),
         env!("TARGET")
     );
-    println!("{}This provides a list of built-in shell commands.", if state.in_mode {
-        "\x1b[38;2;255;165;0m"
-    } else {
-        ""
-    });
-    println!("{}Use `man sesh` to find out more about the shell in general.", if state.in_mode {
-        "\x1b[33;1m"
-    } else {
-        ""
-    });
-    println!("{}Use `man -k' or `info' to find out more about commands not in this list.", if state.in_mode {
-        "\x1b[32;1m"
-    } else {
-        ""
-    });
+    println!(
+        "{}This provides a list of built-in shell commands.",
+        if state.in_mode {
+            "\x1b[38;2;255;165;0m"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "{}Use `man sesh` to find out more about the shell in general.",
+        if state.in_mode { "\x1b[33;1m" } else { "" }
+    );
+    println!(
+        "{}Use `man -k' or `info' to find out more about commands not in this list.",
+        if state.in_mode { "\x1b[32;1m" } else { "" }
+    );
     println!();
     let mut builtins = BUILTINS;
     builtins.sort_by(|v1, v2| v1.0.cmp(v2.0));
@@ -235,7 +232,7 @@ pub fn help(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
                 "\x1b[33;1m",
                 "\x1b[32;1m",
             ];
-            let idx = i%table.len();
+            let idx = i % table.len();
             print!("{}", table[idx]);
         }
         println!("{} {}", builtin.0, builtin.2);
