@@ -9,7 +9,7 @@ pub const BUILTINS: [(
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
     &str,
-); 19] = [
+); 20] = [
     (
         "cd",
         cd,
@@ -91,6 +91,7 @@ pub const BUILTINS: [(
         "Set the focus to the contents of a variable.",
     ),
     ("()", nop, "", "Do nothing and return a status code of 0."),
+    ("nop", nop, "", "Do nothing and return a status code of 0."),
     (
         "if",
         _if,

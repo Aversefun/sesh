@@ -393,7 +393,7 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
     if state.in_mode {
         let table = [
             "\x1b[31;1m",
-            "\x1b[38;2;255;165;0m",
+            "\x1b[38;2;255;165;0;1m",
             "\x1b[33;1m",
             "\x1b[32;1m",
             "\x1b[34;1m",
