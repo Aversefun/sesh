@@ -96,6 +96,10 @@ struct State {
     focus: Focus,
     /// Raw terminal.
     raw_term: Option<Arc<RwLock<termion::raw::RawTerminal<std::io::Stdout>>>>,
+    /// sh
+    in_mode: bool,
+    /// sh
+    entries: usize
 }
 
 unsafe impl Sync for State {}
@@ -318,7 +322,7 @@ fn eval(statement: &str, state: &mut State) {
 
                 state.shell_env.push(ShellVar {
                     name: "STATUS".to_string(),
-                    value: child.wait().unwrap().code().unwrap().to_string(),
+                    value: child.wait().unwrap().code().unwrap_or(255i32).to_string(),
                 });
                 if let Some(raw_term) = state.raw_term.clone() {
                     let writer = raw_term.write().unwrap();
@@ -380,6 +384,18 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(OsStr::new("?"))
             .to_string_lossy(),
     );
+    if state.in_mode {
+        let table = [
+            "\x1b[31;1m",
+            "\x1b[33;1m",
+            "\x1b[32;1m",
+            "\x1b[34;1m",
+            "\x1b[36;1m",
+            "\x1b[35;1m"
+        ];
+        let idx = state.entries.saturating_sub(1)%table.len();
+        prompt += table[idx];
+    }
 
     print!("{}", prompt);
     std::io::stdout().flush()?;
@@ -410,6 +426,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(std::env::home_dir().unwrap_or(PathBuf::from("/"))),
         aliases: Vec::new(),
         raw_term: None,
+        in_mode: false,
+        entries: 0
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT1".to_string(),
@@ -434,6 +452,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             value: "true".to_string(),
         });
     }
+    let _ = ctrlc::set_handler(|| println!());
 
     let rc = std::fs::read(std::env::home_dir().unwrap().join(".seshrc"));
     if rc.is_err() {
@@ -608,6 +627,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         history.push(input.clone().trim().to_string());
         hist_ptr = history.len();
 
+        state.entries += 1;
         eval(&input, &mut state);
     }
 }

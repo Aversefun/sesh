@@ -8,7 +8,7 @@ pub const BUILTINS: [(
     &str,
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
-); 17] = [
+); 19] = [
     ("cd", cd, "[dir]"),
     ("exit", exit, ""),
     ("echo", echo, "[-e] [text ...]"),
@@ -25,7 +25,9 @@ pub const BUILTINS: [(
     ("setf", setf, "var [var ...]"),
     ("getf", getf, "var"),
     ("()", nop, ""),
-    ("if", _if, "condition ( statement ) [ ( else_statement )"),
+    ("if", _if, "condition (statement) [ (else_statement)"),
+    ("while", _while, "condition (statement)"),
+    ("gay", gay, "")
 ];
 
 /// Change the directory
@@ -113,6 +115,9 @@ pub fn help(_: Vec<String>, _: String, _: &mut super::State) -> i32 {
     builtins.sort_by(|v1, v2| v1.0.cmp(v2.0));
 
     for builtin in builtins {
+        if builtin.0 == "gay" {
+            continue;
+        }
         println!("{} {}", builtin.0, builtin.2);
     }
     0
@@ -361,5 +366,41 @@ pub fn _if(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
         super::eval(&args[3].clone(), state);
     }
 
+    0
+}
+
+/// loop while a condition is true
+pub fn _while(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    if args.len() < 3 {
+        println!(
+            "sesh: {0}: usage: {0} condition (statement)",
+            args[0]
+        );
+        return 1;
+    }
+
+    fn test(condition: String, state: &mut super::State) -> bool {
+        super::eval(&condition, state);
+        state.shell_env.reverse();
+        let mut status = 0i32;
+        for var in &state.shell_env {
+            if var.name == "STATUS" {
+                status = var.value.parse().unwrap();
+            }
+        }
+        state.shell_env.sort_by(|v1, v2| v1.name.cmp(&v2.name));
+        status == 0
+    }
+
+    while test(args[1].clone(), state) {
+        super::eval(&args[2].clone(), state);
+    }
+
+    0
+}
+
+/// shh
+pub fn gay(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    state.in_mode = true;
     0
 }
