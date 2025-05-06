@@ -100,6 +100,8 @@ struct State {
     in_mode: bool,
     /// sh
     entries: usize,
+    /// The history
+    history: Vec<String>,
 }
 
 unsafe impl Sync for State {}
@@ -435,6 +437,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         raw_term: None,
         in_mode: false,
         entries: 0,
+        history: std::fs::read_to_string(std::env::home_dir().unwrap().join(".sesh_history"))
+            .unwrap_or_default()
+            .split("\n")
+            .map(|v| v.trim_matches(|ch: char| ch.is_control()))
+            .map(|v| v.to_string())
+            .filter(|v| !v.is_empty())
+            .collect(),
     };
     state.shell_env.push(ShellVar {
         name: "PROMPT1".to_string(),
@@ -483,13 +492,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eval(&options.run_before, &mut state)
     }
 
-    let mut history: Vec<String> =
-        std::fs::read_to_string(std::env::home_dir().unwrap().join(".sesh_history"))
-            .unwrap_or_default()
-            .split("\n")
-            .map(|v| v.to_string())
-            .collect();
-    let mut hist_ptr: usize = history.len();
+    let mut hist_ptr: usize = state.history.len();
 
     state.raw_term = Some(Arc::new(RwLock::new(std::io::stdout().into_raw_mode()?)));
 
@@ -552,14 +555,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                                 curr_inp_hist = input;
 
-                                input = history[hist_ptr].clone();
+                                input = state.history[hist_ptr].clone();
                                 writer.write_all(input.as_bytes())?;
                                 writer.flush()?;
                             }
                         }
                         [91, 66] => {
                             // down arrow
-                            if hist_ptr + 1 < history.len() {
+                            if hist_ptr + 1 < state.history.len() {
                                 hist_ptr += 1;
                                 let writer = state.raw_term.clone().unwrap();
                                 let mut writer = writer.write().unwrap();
@@ -568,11 +571,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 write_prompt(state.clone())?;
                                 writer.write_all(b"\x1b[0K")?;
 
-                                input = history[hist_ptr].clone();
+                                input = state.history[hist_ptr].clone();
                                 writer.write_all(input.as_bytes())?;
                                 writer.flush()?;
                             } else {
-                                hist_ptr = history.len();
+                                hist_ptr = state.history.len();
                                 let writer = state.raw_term.clone().unwrap();
                                 let mut writer = writer.write().unwrap();
 
@@ -637,7 +640,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("\x0D");
         input = input.clone().trim().to_string();
-        history.push(input.clone());
+        state.history.push(input.clone());
 
         std::fs::OpenOptions::new()
             .create(true)
@@ -647,7 +650,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .write_all((input.clone() + "\n").into_bytes().as_slice())
             .unwrap();
 
-        hist_ptr = history.len();
+        hist_ptr = state.history.len();
 
         state.entries += 1;
         eval(&input, &mut state);

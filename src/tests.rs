@@ -15,6 +15,7 @@ pub fn bench_eval(bencher: &mut test::Bencher) {
             raw_term: None,
             in_mode: false,
             entries: 0,
+            history: vec![],
         };
         state.shell_env.push(ShellVar {
             name: "PROMPT1".to_string(),

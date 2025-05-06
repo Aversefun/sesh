@@ -9,7 +9,7 @@ pub const BUILTINS: [(
     fn(args: Vec<String>, unsplit_args: String, state: &mut super::State) -> i32,
     &str,
     &str,
-); 20] = [
+); 21] = [
     (
         "cd",
         cd,
@@ -109,6 +109,12 @@ pub const BUILTINS: [(
         gay,
         "",
         "Change the colors of the terminal to cycle through the pride flag colors!",
+    ),
+    (
+        "history",
+        history,
+        "",
+        "Output the full history being used by this shell, prefixed by numbers.",
     ),
 ];
 
@@ -516,5 +522,27 @@ pub fn _while(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 /// shh
 pub fn gay(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
     state.in_mode = true;
+    0
+}
+
+/// Output the history
+pub fn history(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
+    for (i, item) in state.history.iter().enumerate() {
+        let item = item.trim_matches(|c: char| c.is_control());
+        if state.in_mode {
+            let table = [
+                "\x1b[31;1m",
+                "\x1b[38;2;255;165;0m",
+                "\x1b[33;1m",
+                "\x1b[32;1m",
+                "\x1b[34;1m",
+                "\x1b[36;1m",
+                "\x1b[35;1m",
+            ];
+            let idx = i % table.len();
+            print!("{}", table[idx]);
+        }
+        println!("{}: {}", i + 1, item);
+    }
     0
 }
