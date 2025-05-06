@@ -522,6 +522,7 @@ pub fn _while(args: Vec<String>, _: String, state: &mut super::State) -> i32 {
 /// shh
 pub fn gay(_: Vec<String>, _: String, state: &mut super::State) -> i32 {
     state.in_mode = !state.in_mode;
+    state.entries = 0;
     0
 }
 

@@ -402,7 +402,7 @@ fn write_prompt(state: State) -> Result<(), Box<dyn std::error::Error>> {
             "\x1b[36;1m",
             "\x1b[35;1m",
         ];
-        let idx = state.entries.saturating_sub(1) % table.len();
+        let idx = state.entries % table.len();
         prompt += table[idx];
     }
 
